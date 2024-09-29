@@ -1,4 +1,5 @@
 
+---
 
 # Kubernetes ServiceAccount API Token Guide
 
@@ -8,6 +9,8 @@ This guide explains how to manually create a long-lived API token for a Kubernet
 - Manually generating a secret for the ServiceAccount token
 - Patching the ServiceAccount to use the secret
 - Retrieving and using the API token for authentication
+- Checking if the ServiceAccount has the required permissions
+- Granting permissions if necessary
 
 ## 1. Create a ServiceAccount
 
@@ -89,22 +92,97 @@ curl -k -H "Authorization: Bearer <api-token>" https://<k8s-api-server>:6443/api
 
 Replace `<api-token>` with the token you retrieved, and `<k8s-api-server>` with the URL of your Kubernetes API server.
 
-## YAML Example: Secret Definition
+## 6. Verify if the ServiceAccount Can Get Pods
 
-Below is a YAML example to create a secret for the ServiceAccount token:
+You can check if the ServiceAccount has permission to get pods using the following command:
 
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: build-robot-secret
-  annotations:
-    kubernetes.io/service-account.name: build-robot
-type: kubernetes.io/service-account-token
+```bash
+kubectl auth can-i get pods --as=system:serviceaccount:<namespace>:<service-account-name>
 ```
 
-Apply this YAML to manually create the secret for the ServiceAccount `build-robot`.
+Example:
+
+```bash
+kubectl auth can-i get pods --as=system:serviceaccount:default:build-robot
+```
+
+If the response is:
+
+```bash
+yes
+```
+
+It means the ServiceAccount has permission to get pods.
+
+If the response is:
+
+```bash
+no
+```
+
+The ServiceAccount does not have the required permission, and you'll need to grant it.
+
+## 7. Grant Permission to Get Pods
+
+If the ServiceAccount doesn't have permission to get pods, you can create a Role and RoleBinding to grant the necessary access.
+
+### 7.1 Create a Role
+
+Create a YAML file for the Role with permissions to get pods:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: default
+  name: pod-reader
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+```
+
+### 7.2 Create a RoleBinding
+
+Create a YAML file for the RoleBinding to bind the Role to the ServiceAccount:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: read-pods-binding
+  namespace: default
+subjects:
+- kind: ServiceAccount
+  name: build-robot
+  namespace: default
+roleRef:
+  kind: Role
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io
+```
+
+Apply both files:
+
+```bash
+kubectl apply -f <role-file>.yaml
+kubectl apply -f <rolebinding-file>.yaml
+```
+
+### 7.3 Re-check Permissions
+
+After applying the necessary Role and RoleBinding, you can re-check if the ServiceAccount can get pods:
+
+```bash
+kubectl auth can-i get pods --as=system:serviceaccount:default:build-robot
+```
+
+If the permission is successfully granted, you'll see:
+
+```bash
+yes
+```
 
 ---
 
-This guide provides a way to create a long-lived API token for Kubernetes ServiceAccounts, giving you the ability to authenticate and interact with the Kubernetes API securely.
+This guide provides a comprehensive way to create and manage long-lived API tokens for Kubernetes ServiceAccounts, including permission handling for API access.
